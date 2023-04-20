@@ -21,3 +21,27 @@ Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_do
 and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
 be found at <https://hexdocs.pm/dagger_ex>.
 
+## Running
+
+Writing a script
+
+```elixir
+Mix.install([
+  {:dagger_ex, github: "wingyplus/dagger_ex"}
+])
+
+Dagger.connect!()
+|> Dagger.Query.container([])
+|> Dagger.Container.from(address: "hexpm/elixir:1.14.4-erlang-25.3-debian-buster-20230227-slim")
+|> Dagger.Container.with_exec(args: ["elixir", "--version"])
+|> Dagger.Container.stdout()
+|> IO.puts()
+```
+
+Then running with:
+
+```shell
+$ dagger run elixir ci.exs
+```
+
+Where `ci.exs` contains Elixir script above.
