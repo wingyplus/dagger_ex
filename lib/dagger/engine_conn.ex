@@ -3,11 +3,20 @@ defmodule Dagger.EngineConn do
 
   defstruct [:port, :token, :session_pid]
 
+  @dagger_cli_version "0.5.0"
+  @dagger_bin_prefix "dagger-"
+
   @doc false
   def get(opts) do
     case from_session_env(opts) do
-      {:ok, conn} -> {:ok, conn}
-      _otherwise -> from_local_cli(opts)
+      {:ok, conn} ->
+        {:ok, conn}
+
+      _otherwise ->
+        case from_local_cli(opts) do
+          {:ok, conn} -> {:ok, conn}
+          _otherwise -> from_remote_cli(opts)
+        end
     end
   end
 
@@ -25,22 +34,57 @@ defmodule Dagger.EngineConn do
 
   @doc false
   def from_local_cli(opts) do
-    connect_timeout = opts[:connect_timeout]
-
     with {:ok, bin} <- System.fetch_env("_EXPERIMENTAL_DAGGER_CLI_BIN"),
-         bin when is_binary(bin) <- System.find_executable(bin) do
-      # TODO: setup logger base on `opts`.
-      session_pid = spawn_link(Dagger.Session, :start, [bin, self(), &Dagger.StdoutLogger.log/1])
-
-      receive do
-        {^session_pid, %{"port" => port, "session_token" => token}} ->
-          {:ok, %__MODULE__{port: port, token: token, session_pid: session_pid}}
-      after
-        connect_timeout -> {:error, :session_timeout}
-      end
+         bin_path when is_binary(bin_path) <- System.find_executable(bin) do
+      start_cli_session(bin_path, opts)
     else
       nil -> {:error, :no_executable}
       otherwise -> otherwise
+    end
+  end
+
+  # https://www.erlang.org/docs/22/man/filename.html
+
+  @doc false
+  def from_remote_cli(opts) do
+    cache_dir = :filename.basedir(:user_cache, "dagger")
+    File.mkdir_p!(cache_dir)
+    File.chmod!(cache_dir, 0o700)
+    bin_name = dagger_bin_name(:os.type())
+    cache_bin_path = Path.join([cache_dir, bin_name])
+
+    bin_path =
+      case File.stat(cache_bin_path) do
+        {:error, :enoent} ->
+          # TODO: download and return bin_path.
+          raise "TODO"
+
+        {:ok, _} ->
+          cache_bin_path
+      end
+
+    start_cli_session(bin_path, opts)
+  end
+
+  defp dagger_bin_name({:unix, _}) do
+    @dagger_bin_prefix <> @dagger_cli_version
+  end
+
+  defp dagger_bin_name({:win32, :nt}) do
+    @dagger_bin_prefix <> @dagger_cli_version <> ".exe"
+  end
+
+  defp start_cli_session(bin_path, opts) do
+    connect_timeout = opts[:connect_timeout]
+    # TODO: setup logger base on `opts`.
+    session_pid =
+      spawn_link(Dagger.Session, :start, [bin_path, self(), &Dagger.StdoutLogger.log/1])
+
+    receive do
+      {^session_pid, %{"port" => port, "session_token" => token}} ->
+        {:ok, %__MODULE__{port: port, token: token, session_pid: session_pid}}
+    after
+      connect_timeout -> {:error, :session_timeout}
     end
   end
 
