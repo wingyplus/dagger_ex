@@ -3,8 +3,9 @@ defmodule Dagger.EngineConn do
 
   defstruct [:port, :token, :session_pid]
 
-  @dagger_cli_version "0.5.0"
+  @dagger_cli_version "0.5.2"
   @dagger_bin_prefix "dagger-"
+  @dagger_default_cli_host "dl.dagger.io"
 
   @doc false
   def get(opts) do
@@ -50,28 +51,85 @@ defmodule Dagger.EngineConn do
     cache_dir = :filename.basedir(:user_cache, "dagger")
     File.mkdir_p!(cache_dir)
     File.chmod!(cache_dir, 0o700)
-    bin_name = dagger_bin_name(:os.type())
+    bin_name = dagger_bin_name(os())
     cache_bin_path = Path.join([cache_dir, bin_name])
 
-    bin_path =
-      case File.stat(cache_bin_path) do
-        {:error, :enoent} ->
-          # TODO: download and return bin_path.
-          raise "TODO"
+    case File.stat(cache_bin_path) do
+      {:error, :enoent} ->
+        # TODO: improve it.
+        temp_bin_path = Path.join([cache_dir, "temp-" <> bin_name]) |> dbg()
 
-        {:ok, _} ->
-          cache_bin_path
+        with :ok <- extract_cli(temp_bin_path),
+             :ok <- File.chmod(temp_bin_path, 0o700),
+             :ok <- File.rename(temp_bin_path, cache_bin_path) do
+          {:ok, cache_bin_path}
+        end
+
+      # TODO: remove old cli binaries.
+
+      {:ok, _} ->
+        {:ok, cache_bin_path}
+    end
+    |> case do
+      {:ok, bin_path} ->
+        start_cli_session(bin_path, opts)
+
+      error ->
+        error
+    end
+  end
+
+  # TODO: checksum.
+  defp extract_cli(bin_path) do
+    with {:ok, response} <- Req.get(cli_archive_url()) do
+      {_, dagger_bin} =
+        Enum.find(response.body, fn {filename, _bin} ->
+          filename == dagger_bin_in_archive(os())
+        end)
+
+      File.write(bin_path, dagger_bin)
+    end
+  end
+
+  defp dagger_bin_in_archive(:windows), do: ~c"dagger.exe"
+  defp dagger_bin_in_archive(_), do: ~c"dagger"
+
+  defp cli_archive_url() do
+    archive_name = default_cli_archive_name(os(), arch())
+    "https://#{@dagger_default_cli_host}/dagger/releases/#{@dagger_cli_version}/#{archive_name}"
+  end
+
+  defp arch() do
+    case :erlang.system_info(:system_architecture) |> to_string() do
+      "aarch64" <> _rest -> "arm64"
+      "x86_64" <> _rest -> "amd64"
+    end
+  end
+
+  defp os() do
+    case :os.type() do
+      {:unix, :darwin} -> :darwin
+      {:unix, :linux} -> :linux
+      {:windows, :nt} -> :windows
+    end
+  end
+
+  defp default_cli_archive_name(os, arch) do
+    ext =
+      case os do
+        os when os in [:linux, :darwin] -> "tar.gz"
+        :windows -> "zip"
       end
 
-    start_cli_session(bin_path, opts)
+    "dagger_v#{@dagger_cli_version}_#{os}_#{arch}.#{ext}"
   end
 
-  defp dagger_bin_name({:unix, _}) do
-    @dagger_bin_prefix <> @dagger_cli_version
-  end
-
-  defp dagger_bin_name({:win32, :nt}) do
+  defp dagger_bin_name(:windows) do
     @dagger_bin_prefix <> @dagger_cli_version <> ".exe"
+  end
+
+  defp dagger_bin_name(_) do
+    @dagger_bin_prefix <> @dagger_cli_version
   end
 
   defp start_cli_session(bin_path, opts) do
