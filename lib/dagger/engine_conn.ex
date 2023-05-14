@@ -49,33 +49,28 @@ defmodule Dagger.EngineConn do
   @doc false
   def from_remote_cli(opts) do
     cache_dir = :filename.basedir(:user_cache, "dagger")
-    File.mkdir_p!(cache_dir)
-    File.chmod!(cache_dir, 0o700)
-    bin_name = dagger_bin_name(os())
-    cache_bin_path = Path.join([cache_dir, bin_name])
 
-    case File.stat(cache_bin_path) do
-      {:error, :enoent} ->
-        # TODO: improve it.
-        temp_bin_path = Path.join([cache_dir, "temp-" <> bin_name]) |> dbg()
-
-        with :ok <- extract_cli(temp_bin_path),
-             :ok <- File.chmod(temp_bin_path, 0o700),
-             :ok <- File.rename(temp_bin_path, cache_bin_path) do
-          {:ok, cache_bin_path}
-        end
-
-      # TODO: remove old cli binaries.
-
-      {:ok, _} ->
+    with :ok <- File.mkdir_p(cache_dir),
+         :ok <- File.chmod(cache_dir, 0o700),
+         bin_name = dagger_bin_name(os()),
+         cache_bin_path = Path.join([cache_dir, bin_name]) do
+      with {:error, :enoent} <- File.stat(cache_bin_path),
+           temp_bin_path = Path.join([cache_dir, "temp-" <> bin_name]),
+           :ok <- extract_cli(temp_bin_path),
+           :ok <- File.chmod(temp_bin_path, 0o700),
+           :ok <- File.rename(temp_bin_path, cache_bin_path) do
         {:ok, cache_bin_path}
-    end
-    |> case do
-      {:ok, bin_path} ->
-        start_cli_session(bin_path, opts)
+      else
+        {:ok, _stat} -> {:ok, cache_bin_path}
+        error -> error
+      end
+      |> case do
+        {:ok, bin_path} ->
+          start_cli_session(bin_path, opts)
 
-      error ->
-        error
+        error ->
+          error
+      end
     end
   end
 
