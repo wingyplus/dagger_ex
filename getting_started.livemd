@@ -1,50 +1,67 @@
 # Getting Started with `dagger_ex`
 
+## Introduction
+
+This tutorial teaches you the basics of using Dagger in Elixir. You will learn how to:
+
+* Install the Elixir SDK
+* Create a Elixir CI tool that builds a Elixir application for multiple versions using the Elixir SDK
+
+## Requirements
+
+This tutorial assumes that:
+
+* You have a basic understanding of the Elixir programming language. If not, read the [Elixir tutorial](https://elixir-lang.org/learning.html).
+* You have a Elixir development environment with Go 1.14 or later. If not, [download and install Elixir](https://elixir-lang.org/install.html).
+* You have Docker installed and running on the host system. If not, [install Docker](https://docs.docker.com/engine/install/).
+
+## Installing
+
+### Step 1: Install the Dagger Elixir SDK
+
+<!-- livebook:{"break_markdown":true} -->
+
+If you're using `:dagger_ex` with in mix project add the following line into your `deps/0` in `mix.exs`
+
+```elixir
+{:dagger_ex, github: "wingyplus/dagger_ex", branch: "main"}
+```
+
+Or if you using the SDK with Elixir script, you can use `Mix.install` to installing the dependencies
+
 ```elixir
 Mix.install([
-  {:dagger_ex, path: "."}
+  {:dagger_ex, github: "wingyplus/dagger_ex", branch: "main"}
 ])
 ```
 
-## Before start
+### Step 2: Create a Dagger client in Elixir
 
-You need to install:
+<!-- livebook:{"break_markdown":true} -->
 
-1. `dagger` binary, you can download in the [Release Page](https://github.com/dagger/dagger/releases).
-2. `docker` or `podman`.
-
-And make sure all commands above presents in `$PATH`.
-
-## Connecting to Dagger
-
-Currently, we support only 2 modes:
-
-1. Session mode with `dagger run`. The benefit of running with this mode is it support rich Terminal User Interface (TUI) by set `_EXPERIMENTAL_DAGGER_TUI=1`
-2. Local CLI mode, this mode will start Dagger session and send a request through the session. This mode need to set `_EXPERIMENTAL_DAGGER_CLI_BIN=<path>/<to>/dagger`. We'll use this mode in this tutorial.
+Create a new file named `build.exs`, copy the `Mix.install` in the step 1 to the top of the file and add the following code to it.
 
 ```elixir
-System.put_env("_EXPERIMENTAL_DAGGER_CLI_BIN", "dagger")
+defmodule CI do
+  def build() do
+    client = Dagger.connect!()
+
+    client
+    |> Dagger.Query.container()
+    |> Dagger.Container.from("hexpm/elixir:1.14.4-erlang-25.3-debian-buster-20230227-slim")
+    |> Dagger.Container.with_exec(["elixir", "--version"])
+    |> Dagger.Container.stdout()
+
+    Dagger.disconnect(client)
+  end
+end
+
+CI.build()
 ```
 
-Use `Dagger.connect/0` to connect to Dagger server:
+This Elixir stub create a module called `CI` and has a function named `build` inside of it. When invoke `CI.build/0` in line 15, the function performs the following operations:
 
-```elixir
-{:ok, client} = Dagger.connect()
-```
-
-The result from `Dagger.connect/0` is a tuple of `:ok` with client or `:error` if it cannot connect.
-
-## Fetching the container and running it
-
-In this section, we will pull Elixir image from [hex.pm](https://hub.docker.com/r/hexpm/elixir) organization, getting the version from `elixir` binary and print it to standard output.
-
-After execute the code below, the library will printing out log from Dagger session to the standard output.
-
-```elixir
-client
-|> Dagger.Query.container()
-|> Dagger.Container.from("hexpm/elixir:1.14.4-erlang-25.3-debian-buster-20230227-slim")
-|> Dagger.Container.with_exec(["elixir", "--version"])
-|> Dagger.Container.stdout()
-|> IO.puts()
-```
+* It creates a Dagger client with `Dagger.connect!/1`. This client provides an interface for executing commands against the Dagger engine. The optional configuration displays the output from the Dagger engine.
+* It uses the client's `Dagger.Query.container/0` and call `Dagger.container.from/1` functions to initialize a new container from a base image. In this example, the base image is the hexpm/elixir:1.14.4-erlang-25.3-debian-buster-20230227-slim image. This method returns a Container representing an OCI-compatible container image.
+* It uses the `Dagger.Container.with_exec/1` function to define the command to be executed in the container - in this case, the command `elixir --version`, which returns the Elixir version string. The `Dagger.Container.with_exec/1` function returns a revised Container with the results of command execution.
+* It retrieves the output stream of the last executed command with the `Dagger.Container.stdout/0` method and prints its contents.
